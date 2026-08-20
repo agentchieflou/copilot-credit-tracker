@@ -1,0 +1,15 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.*
+!.env.example
+
+# Local scratch / exported reports
+/tmp/
+/out/
+*.local.json
+
+# Local dev data dir (CCRED_HOME=./.devdata)
+.devdata/

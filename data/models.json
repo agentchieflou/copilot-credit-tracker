@@ -1,0 +1,33 @@
+{
+  "$comment": "Premium-request multipliers for GitHub Copilot. GitHub changes these; treat as a starting point and verify against https://docs.github.com/en/copilot/managing-copilot/monitoring-usage-and-entitlements/about-premium-requests . Override locally with `ccred models --set <id>=<multiplier>` (writes to your data dir, never to this file).",
+  "asOf": "2026-05-01",
+  "source": "https://docs.github.com/en/copilot/managing-copilot/monitoring-usage-and-entitlements/about-premium-requests",
+  "plans": {
+    "free": { "allowance": 50, "label": "Copilot Free" },
+    "pro": { "allowance": 300, "label": "Copilot Pro" },
+    "pro+": { "allowance": 1500, "label": "Copilot Pro+" },
+    "business": { "allowance": 300, "label": "Copilot Business (per seat)" },
+    "enterprise": { "allowance": 1000, "label": "Copilot Enterprise (per seat)" }
+  },
+  "models": [
+    { "id": "gpt-4.1", "label": "GPT-4.1", "vendor": "openai", "multiplier": 0, "aliases": ["41", "gpt41", "base"] },
+    { "id": "gpt-4o", "label": "GPT-4o", "vendor": "openai", "multiplier": 0, "aliases": ["4o"] },
+    { "id": "gpt-5-mini", "label": "GPT-5 mini", "vendor": "openai", "multiplier": 0, "aliases": ["5mini", "gpt5mini"] },
+    { "id": "gpt-5", "label": "GPT-5", "vendor": "openai", "multiplier": 1, "aliases": ["5", "gpt5"] },
+    { "id": "gpt-5-codex", "label": "GPT-5-Codex", "vendor": "openai", "multiplier": 1, "aliases": ["codex"] },
+    { "id": "o3", "label": "o3", "vendor": "openai", "multiplier": 1, "aliases": [] },
+    { "id": "o3-mini", "label": "o3-mini", "vendor": "openai", "multiplier": 0.33, "aliases": ["o3m"] },
+    { "id": "o4-mini", "label": "o4-mini", "vendor": "openai", "multiplier": 0.33, "aliases": ["o4m"] },
+    { "id": "claude-haiku-4.5", "label": "Claude Haiku 4.5", "vendor": "anthropic", "multiplier": 0.33, "aliases": ["haiku", "haiku45"] },
+    { "id": "claude-sonnet-3.5", "label": "Claude Sonnet 3.5", "vendor": "anthropic", "multiplier": 1, "aliases": ["sonnet35"] },
+    { "id": "claude-sonnet-3.7", "label": "Claude Sonnet 3.7", "vendor": "anthropic", "multiplier": 1, "aliases": ["sonnet37"] },
+    { "id": "claude-sonnet-3.7-thinking", "label": "Claude Sonnet 3.7 Thinking", "vendor": "anthropic", "multiplier": 1.25, "aliases": ["sonnet37t"] },
+    { "id": "claude-sonnet-4", "label": "Claude Sonnet 4", "vendor": "anthropic", "multiplier": 1, "aliases": ["sonnet4"] },
+    { "id": "claude-sonnet-4.5", "label": "Claude Sonnet 4.5", "vendor": "anthropic", "multiplier": 1, "aliases": ["sonnet", "sonnet45"] },
+    { "id": "claude-opus-4", "label": "Claude Opus 4", "vendor": "anthropic", "multiplier": 10, "aliases": ["opus4"] },
+    { "id": "claude-opus-4.1", "label": "Claude Opus 4.1", "vendor": "anthropic", "multiplier": 10, "aliases": ["opus", "opus41"] },
+    { "id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash", "vendor": "google", "multiplier": 0.25, "aliases": ["flash"] },
+    { "id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "vendor": "google", "multiplier": 1, "aliases": ["gemini", "g25p"] },
+    { "id": "grok-code-fast-1", "label": "Grok Code Fast 1", "vendor": "xai", "multiplier": 0.25, "aliases": ["grok"] }
+  ]
+}

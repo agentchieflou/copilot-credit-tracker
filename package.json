@@ -1,0 +1,39 @@
+{
+  "name": "copilot-credit-tracker",
+  "version": "0.1.0",
+  "description": "Track GitHub Copilot premium-request credit burn and per-model efficiency across sessions, with automatic monthly billing-cycle rollover and archived history.",
+  "type": "module",
+  "bin": {
+    "ccred": "bin/ccred.js",
+    "copilot-credits": "bin/ccred.js"
+  },
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "data",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "start": "node bin/ccred.js"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "keywords": [
+    "github-copilot",
+    "copilot",
+    "premium-requests",
+    "credits",
+    "usage",
+    "cli"
+  ],
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {}
+}
