@@ -11,6 +11,7 @@ import { cmdHistory } from './commands/history.js';
 import { cmdModels } from './commands/models.js';
 import { cmdConfig, cmdInit } from './commands/config.js';
 import { cmdSync } from './commands/sync.js';
+import { cmdImport } from './commands/import.js';
 import { cmdExport } from './commands/export.js';
 
 const BOOLEAN_FLAGS = [
@@ -27,6 +28,10 @@ const BOOLEAN_FLAGS = [
   'wasted',
   'color',
   'all',
+  'replace',
+  'clear',
+  'by-day',
+  'import',
 ];
 
 const ALIASES = {
@@ -61,6 +66,9 @@ const COMMANDS = {
   cfg: cmdConfig,
   init: cmdInit,
   sync: cmdSync,
+  import: cmdImport,
+  backfill: cmdImport,
+  pull: cmdImport,
   export: cmdExport,
 };
 
@@ -103,6 +111,17 @@ ${c.bold('SETUP')}
   ccred models                    multipliers and plan allowances
   ccred models --set claude-opus-4.1=10
   ccred sync [--scope personal|organization|enterprise] [--dry-run]
+
+${c.bold('STARTING MID-CYCLE')}
+  ccred import                    pull this month's spend from GitHub into the ledger
+  ccred import --file usage.csv   ...or from a usage report you exported instead
+  ccred import --dry-run          show what would be added, write nothing
+  ccred import --replace          discard earlier backfills and re-pull
+  ccred import --clear            remove backfilled entries, keep what you logged
+  ccred import --by-day           list every day added, not just the model totals
+
+  ${c.dim('Backfilled days count toward burn and per-model spend. They carry no session')}
+  ${c.dim('shape or prompt length, because the billing data GitHub returns has neither.')}
 
 ${c.bold('GLOBAL')}
   --json     machine-readable output for any command

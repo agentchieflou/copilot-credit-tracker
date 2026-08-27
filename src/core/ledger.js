@@ -5,6 +5,28 @@ export function newId(prefix) {
   return `${prefix}_${randomUUID().split('-')[0]}`;
 }
 
+/**
+ * Where an entry came from. Prompts you logged carry the full picture - session
+ * shape, prompt length, outcome. Entries backfilled from GitHub's billing data
+ * carry only what GitHub reports: a day, a model and a request count. Both are
+ * real spend, so both count toward burn; only logged ones can honestly speak to
+ * session shape or prompt length, and the metrics engine keeps them apart.
+ */
+export const ORIGIN_IMPORT = 'import';
+
+export function isImported(entry) {
+  return entry?.origin === ORIGIN_IMPORT;
+}
+
+/** Sessions you actually logged, i.e. everything that is not a backfill. */
+export function loggedSessions(period) {
+  return period.sessions.filter((s) => !isImported(s));
+}
+
+export function importedSessions(period) {
+  return period.sessions.filter(isImported);
+}
+
 export function openSessions(period) {
   return period.sessions.filter((s) => s.status === 'open');
 }

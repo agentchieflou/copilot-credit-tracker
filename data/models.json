@@ -10,6 +10,7 @@
     "enterprise": { "allowance": 1000, "label": "Copilot Enterprise (per seat)" }
   },
   "models": [
+    { "id": "copilot-premium-request", "label": "Premium request (model not reported)", "vendor": "github", "multiplier": 1, "synthetic": true, "aliases": [], "$comment": "Where a backfill from GitHub billing data reports a quantity without naming a model. x1 so an unattributed quantity lands as exactly that many credits. `synthetic` keeps it out of SKU matching, where it would out-match the real model name inside \"Copilot Premium Request - Claude ...\"." },
     { "id": "gpt-4.1", "label": "GPT-4.1", "vendor": "openai", "multiplier": 0, "aliases": ["41", "gpt41", "base"] },
     { "id": "gpt-4o", "label": "GPT-4o", "vendor": "openai", "multiplier": 0, "aliases": ["4o"] },
     { "id": "gpt-5-mini", "label": "GPT-5 mini", "vendor": "openai", "multiplier": 0, "aliases": ["5mini", "gpt5mini"] },

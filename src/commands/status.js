@@ -68,11 +68,23 @@ export function cmdStatus(flags, positionals, { json }) {
   console.log(
     kv(
       'sessions',
-      `${fmtNum(sessions.total)} ${c.dim(
-        `(${fmtPct(sessions.singleRate)} one-prompt, ${fmtNum(sessions.avgPrompts)} prompts avg)`,
-      )}`,
+      sessions.total
+        ? `${fmtNum(sessions.total)} ${c.dim(
+            `(${fmtPct(sessions.singleRate)} one-prompt, ${fmtNum(sessions.avgPrompts)} prompts avg)`,
+          )}`
+        : c.dim('none logged yet'),
     ),
   );
+  if (m.imported) {
+    console.log(
+      kv(
+        'backfilled',
+        `${fmtNum(m.imported.credits)} credits ${c.dim(
+          `(${fmtPct(m.imported.share)} of the total, ${m.imported.days} ${plural(m.imported.days, 'day')} from ${m.imported.sources.join(', ') || 'an import'})`,
+        )}`,
+      ),
+    );
+  }
 
   const top = m.models.slice(0, 3);
   if (top.length) {
@@ -84,7 +96,7 @@ export function cmdStatus(flags, positionals, { json }) {
           c.dim(`x${mod.multiplier}`),
           `${fmtNum(mod.credits)} cr`,
           c.dim(`${fmtPct(mod.share)}`),
-          c.dim(`${fmtNum(mod.prompts)} ${plural(mod.prompts, 'prompt')}`),
+          c.dim(`${fmtNum(mod.requests)} ${plural(mod.requests, 'request')}`),
         ]),
         { align: ['left', 'left', 'right', 'right', 'right'] },
       ),
@@ -116,7 +128,13 @@ export function cmdStatus(flags, positionals, { json }) {
 
   if (!burn.prompts) {
     console.log('');
-    console.log(c.dim('  Nothing logged yet. Try:  ccred log sonnet "fixing the auth redirect"'));
+    if (!burn.entries) {
+      console.log(c.dim('  Nothing here yet. Start from what you have already spent this cycle:'));
+      console.log(c.dim('    ccred import                       pull it from GitHub'));
+      console.log(c.dim('    ccred import --file usage.csv      ...or from an exported usage report'));
+      console.log('');
+    }
+    console.log(c.dim('  Then log as you go:  ccred log sonnet "fixing the auth redirect"'));
   }
   console.log('');
   return null;

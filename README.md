@@ -3,6 +3,9 @@
 Track where your GitHub Copilot premium-request credits actually go — and whether the
 model you picked earned them.
 
+- **Start mid-cycle, not from zero.** `ccred import` pulls what you have already
+  spent this month out of GitHub's billing data and into the ledger, so the first
+  thing you see is your real number rather than an empty bar.
 - **Burn rate first.** How much of the monthly allowance is gone, how fast, and what
   the projection says about the rest of the cycle.
 - **Session shape.** One-prompt wins vs. five-prompt grinds, and the share of your
@@ -12,7 +15,7 @@ model you picked earned them.
   separately if your agreement bills that way.
 - **Personal and enterprise.** The local ledger always works; `ccred sync` reconciles
   against GitHub's billing usage API for a personal account, an organization or an
-  enterprise (including GHES base URLs).
+  enterprise (including GHES base URLs). No API access? Import the CSV instead.
 
 Zero runtime dependencies — Node built-ins only. Nothing to vendor, nothing to audit,
 nothing to break an internal registry mirror.
@@ -42,6 +45,13 @@ ccred init --plan pro --reset-day 14
 
 `--reset-day` is the day of the month your Copilot allowance renews — for most
 personal plans that is your subscription renewal date, not the 1st.
+
+If the cycle is already underway, pull in what you have spent so far — the tracker
+does not have to start at zero:
+
+```bash
+ccred import
+```
 
 Log a request as you make it:
 
@@ -75,10 +85,98 @@ Copilot credits - 2026-08 (Copilot Pro, Aug 14 to Sep 14)
   safe daily         16.97 credits/day to finish exactly on budget
   sessions           41 (63% one-prompt, 1.68 prompts avg)
 
-  Claude Opus 4.1    x10       60 cr  62%  6 prompts
-  Claude Sonnet 4.5  x1        33 cr  34%  33 prompts
-  Claude Haiku 4.5   x0.33   3.33 cr   3%  10 prompts
+  Claude Opus 4.1    x10       60 cr  62%  6 requests
+  Claude Sonnet 4.5  x1        33 cr  34%  33 requests
+  Claude Haiku 4.5   x0.33   3.33 cr   3%  10 requests
 ```
+
+## Starting mid-cycle
+
+Installing this on the 20th should not mean pretending the month began on the 20th.
+`ccred import` reads GitHub's billing usage for the current cycle and writes it into
+the ledger as real spend:
+
+```bash
+ccred import
+```
+
+```
+Imported 2026-08 (Aug 14 - Sep 14)
+----------------------------------
+  source             GitHub billing usage (personal, gh auth token)
+  added              62 credits over 3 days (35 premium requests, 4 models)
+  unattributed       4 credits GitHub reported without naming a model
+  tokens             not reported - GitHub bills per premium request, not per token
+
+  ██████░░░░░░░░░░░░░░░░░░░░░░░░ 62/300 21%
+  was 0 before this import
+
+  model                                 mult  credits  requests  days
+  ------------------------------------  ----  -------  --------  ----
+  Claude Opus 4.1                       x10        30         3    1d
+  Claude Sonnet 4.5                     x1         21        21    2d
+  GPT-5                                 x1          7         7    1d
+  Premium request (model not reported)  x1          4         4    1d
+```
+
+Do it as part of setup with `ccred init --plan pro --reset-day 14 --import`, or any
+time afterwards. Past cycles work too: `ccred import 2026-07` writes into that
+cycle's archive.
+
+**No API access?** GitHub Enterprise Server, an older account, or an org that
+restricts billing reads will all refuse the usage endpoint. Download the usage
+report from GitHub's billing page and import the file instead — same result, no
+token needed:
+
+```bash
+ccred import --file ~/Downloads/usage-2026-08.csv
+```
+
+The file reader takes GitHub's CSV export, the billing API's JSON response saved
+verbatim, or any CSV with a date, a model or SKU, and a quantity. Headers are matched
+loosely, so `Net Amount`, `netAmount` and `net_amount` are the same column, and a
+spreadsheet that saved semicolons instead of commas still reads. If your file happens
+to carry token counts, they come in too.
+
+| Flag | What it does |
+| --- | --- |
+| `--file <path>` | Import from a downloaded report instead of the API. |
+| `--dry-run` | Show exactly what would be added and write nothing. Still reads from GitHub. |
+| `--replace` | Discard earlier backfills for the cycle and re-import, for when GitHub's report was revised or you imported the wrong scope. |
+| `--clear` | Remove backfilled entries and keep everything you logged by hand. |
+| `--quantity raw` | Read the quantity column as model interactions to be multiplied, rather than as already-billed premium requests. |
+| `--scope` / `--org` / `--enterprise` / `--token` | Same as `ccred sync`. |
+
+### Importing twice is safe
+
+Import fills the gap rather than appending. For each day and model it compares
+GitHub's number against what the ledger already holds and adds only the difference:
+
+- Run it twice and the second run adds nothing.
+- Log five Sonnet prompts today, then import a day GitHub billed at twelve, and seven
+  credits are added — not twelve.
+- Log more than GitHub reports and nothing is touched; the excess is shown as
+  `ledger ahead` so you can go and find the mis-log.
+
+### What a backfilled day can and cannot tell you
+
+GitHub's billing data is a date, a SKU and a quantity. It does not say which prompts
+belonged to the same problem, how long any of them were, or how many tokens moved —
+GitHub bills per premium request, not per token, and reports no token counts at all.
+
+So imported entries are marked, and the report keeps them in their place:
+
+| | counts backfilled spend | logged prompts only |
+| --- | --- | --- |
+| credits, allowance, pace, projection | yes | |
+| daily burn, per-model spend and share | yes | |
+| sessions, one-and-done rate, re-prompt tax | | yes |
+| prompt length and follow-ups by opener | | yes |
+| credits per session, cost to finish | | yes |
+
+That is the point of the split: a backfilled month can tell you truthfully what you
+spent, and would only lie if it were allowed to tell you how you spent it. Everything
+you log from the day you install carries the full picture.
 
 ## Commands
 
@@ -135,6 +233,7 @@ whatever dashboard you already have.
 | `ccred models` | Multipliers and plan allowances. |
 | `ccred models --set claude-opus-4.1=10` | Correct a multiplier, or register a model GitHub added after this release. |
 | `ccred sync` | Reconcile the ledger against GitHub's billing usage API. |
+| `ccred import [cycle]` | Pull a cycle's spend out of GitHub and into the ledger. `--file <path>` reads a downloaded report instead. |
 
 ## How the monthly reset works
 
@@ -211,6 +310,12 @@ ccred config set tokenRates.default.output 1.5
 
 ## Syncing with GitHub (personal and enterprise)
 
+`sync` and `import` read the same endpoint and do opposite things with it. `sync`
+leaves the ledger alone and reports the difference; `import` closes it. Use `sync`
+when the ledger is meant to be complete and you want to know if it is. Use `import`
+when it is knowingly incomplete — the month before you installed this, or a stretch
+you forgot to log.
+
 The local ledger is always the source of truth. `sync` adds GitHub's own count next to
 it so you can see drift — requests you forgot to log, or logs that overstate.
 
@@ -248,7 +353,13 @@ Caveats worth knowing before you trust the drift number:
   than guess.
 - Sync is a reconciliation, not a replacement. Nothing in GitHub's report says *which
   prompt* a request belonged to, so session shape, prompt length and per-model
-  efficiency can only come from the local ledger.
+  efficiency can only come from the local ledger. The same limit applies to `import`,
+  which is why backfilled entries are kept out of those numbers.
+- The quantity GitHub reports is read as already-billed premium requests, so a day of
+  Opus billed at 30 becomes 30 credits and 3 requests. If your report counts raw
+  interactions instead, pass `--quantity raw`.
+- Both commands accept a cycle id, and both write to that cycle's archive rather than
+  the live ledger when it is a finished one.
 
 ## Model multipliers
 
@@ -275,12 +386,14 @@ npm test          # node:test, no test framework to install
 ```
 
 Tests cover the cycle maths (including reset-day 31 through February), rollover and
-archiving, the metrics engine, argument parsing and the sync helpers.
+archiving, the metrics engine, argument parsing, the sync helpers, and the backfill —
+CSV reading, SKU-to-model matching, gap filling, idempotency, and the guarantee that
+imported spend never reaches the session-shape numbers.
 
 ```
-src/core/     period maths, ledger, state + rollover, metrics
+src/core/     period maths, ledger, state + rollover, metrics, backfill
 src/commands/ one file per command
-src/util/     argv parsing, terminal formatting, text measurement
+src/util/     argv parsing, terminal formatting, text measurement, csv reading
 data/         bundled multiplier table
 ```
 

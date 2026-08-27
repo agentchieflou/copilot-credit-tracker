@@ -112,7 +112,7 @@ function validate(key, value) {
   }
 }
 
-export function cmdInit(flags, positionals, { json }) {
+export async function cmdInit(flags, positionals, { json }) {
   const cfg = loadConfig();
   const t = loadModelTable();
 
@@ -154,7 +154,17 @@ export function cmdInit(flags, positionals, { json }) {
   saveConfig(cfg);
   const state = loadState();
 
-  if (json) return { config: cfg, period: state.period };
+  // Setting up on the 20th should not mean starting from zero: --import pulls
+  // the cycle so far in, so the first `ccred status` shows the real number.
+  const wantsImport = flags.import === true || asString(flags.file ?? flags.from, null) !== null;
+  const runImport = async () => {
+    const { cmdImport } = await import('./import.js');
+    return cmdImport(flags, [], { json });
+  };
+
+  if (json) {
+    return { config: cfg, period: state.period, imported: wantsImport ? await runImport() : null };
+  }
 
   console.log(heading('Ready'));
   console.log(kv('plan', `${t.plans[cfg.plan]?.label || cfg.plan} - ${fmtNum(planAllowance(cfg, t))} credits/cycle`));
@@ -162,6 +172,16 @@ export function cmdInit(flags, positionals, { json }) {
   console.log(kv('github scope', cfg.github.scope + (cfg.github.org ? ` (${cfg.github.org})` : cfg.github.enterprise ? ` (${cfg.github.enterprise})` : '')));
   console.log(kv('data dir', c.dim(paths().home)));
   console.log('');
+
+  if (wantsImport) {
+    await runImport();
+  } else {
+    console.log(c.dim('  Already spent part of this cycle? Pull it in rather than starting from zero:'));
+    console.log(c.dim('    ccred import                    from GitHub billing usage'));
+    console.log(c.dim('    ccred import --file usage.csv   from an exported usage report'));
+    console.log('');
+  }
+
   console.log(c.dim('  ccred log sonnet "first prompt of the day"'));
   console.log(c.dim('  ccred status'));
   console.log('');
