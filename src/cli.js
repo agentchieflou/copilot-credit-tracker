@@ -115,6 +115,7 @@ ${c.bold('SETUP')}
 ${c.bold('STARTING MID-CYCLE')}
   ccred import                    pull this month's spend from GitHub into the ledger
   ccred import --file usage.csv   ...or from a usage report you exported instead
+  ccred import --credits 142      ...or from a number you can only read off a screen
   ccred import --dry-run          show what would be added, write nothing
   ccred import --replace          discard earlier backfills and re-pull
   ccred import --clear            remove backfilled entries, keep what you logged

@@ -136,7 +136,17 @@ export async function fetchUsageItems(urls, token) {
   return { items, errors };
 }
 
-/** Turn the first failure into something that says what to do about it. */
+/**
+ * Turn the first failure into something that says what to do about it. Both of
+ * the likely failures are a restriction rather than a bug, so both name the two
+ * routes that need no API access at all - otherwise the people most likely to
+ * be blocked are the ones left with nowhere to go.
+ */
+const OFFLINE_ROUTES = [
+  '    ccred import --file usage.csv    from a usage report you downloaded',
+  '    ccred import --credits 142       from a number you can only read off a screen',
+];
+
 export function describeUsageFailure(errors) {
   const first = errors[0];
   const hint =
@@ -144,11 +154,17 @@ export function describeUsageFailure(errors) {
       ? [
           '',
           '  This endpoint needs the enhanced billing platform and a token with "Plan" read access.',
-          '  GitHub Enterprise Server may not expose it at all - download the usage report from the',
-          '  web UI and run `ccred import --file <report.csv>` instead.',
+          '  GitHub Enterprise Server may not expose it at all. Neither of these needs it:',
+          ...OFFLINE_ROUTES,
         ].join('\n')
       : first.status === 403
-        ? '\n  The token is missing the billing/Plan read permission, or your org restricts it.'
+        ? [
+            '',
+            '  Billing usage is an owner / billing-manager surface. A token without "Plan" read',
+            '  access, or a seat in an org that restricts billing reads, lands here. The local',
+            '  ledger still works, and neither of these needs the API:',
+            ...OFFLINE_ROUTES,
+          ].join('\n')
         : '';
   return new Error(`${first.message}${hint}`);
 }

@@ -226,14 +226,21 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
   const dailyMap = new Map();
   for (const p of prompts) {
     const key = localDateKey(p.at);
-    const row = dailyMap.get(key) || { date: key, credits: 0, prompts: 0, requests: 0, imported: 0 };
+    const row = dailyMap.get(key) || { date: key, credits: 0, prompts: 0, requests: 0, imported: 0, opening: 0 };
     row.credits = round4(row.credits + promptCredits(p));
     row.requests = round4(row.requests + (p.count || 0));
-    if (isImported(p)) row.imported = round4(row.imported + promptCredits(p));
-    else row.prompts += 1;
+    if (isImported(p)) {
+      row.imported = round4(row.imported + promptCredits(p));
+      if (p.source === 'manual') row.opening = round4(row.opening + promptCredits(p));
+    } else {
+      row.prompts += 1;
+    }
     dailyMap.set(key, row);
   }
   const daily = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+  // An opening balance sits on the first day of the cycle by construction, so
+  // it would win "busiest day" every time without meaning anything by it.
+  const workDays = daily.filter((d) => round4(d.credits - d.opening) > 0);
 
   // ---- backfill ------------------------------------------------------------
   const importedDays = [...new Set(imported.map((p) => localDateKey(p.at)))].sort();
@@ -251,6 +258,7 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
           promptCredits,
         ),
         sources: [...new Set(period.sessions.filter(isImported).map((s) => s.import?.source).filter(Boolean))],
+        opening: sum(imported.filter((p) => p.source === 'manual'), promptCredits),
         at: period.lastImport?.at || null,
       }
     : null;
@@ -298,7 +306,7 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
       pace,
       safeDaily,
       exhaustion,
-      busiestDay: daily.length ? daily.reduce((a, b) => (b.credits > a.credits ? b : a)) : null,
+      busiestDay: workDays.length ? workDays.reduce((a, b) => (b.credits > a.credits ? b : a)) : null,
       activeDays: daily.length,
     },
     sessions: sessionStats,

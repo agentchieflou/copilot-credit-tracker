@@ -123,24 +123,53 @@ Do it as part of setup with `ccred init --plan pro --reset-day 14 --import`, or 
 time afterwards. Past cycles work too: `ccred import 2026-07` writes into that
 cycle's archive.
 
-**No API access?** GitHub Enterprise Server, an older account, or an org that
-restricts billing reads will all refuse the usage endpoint. Download the usage
-report from GitHub's billing page and import the file instead — same result, no
-token needed:
+### If you are blocked from the billing API
+
+Billing usage is an owner / billing-manager surface. A developer holding a Copilot
+Business or Enterprise seat is exactly the person who wants this tool and exactly the
+person most likely to get a `403` from that endpoint — and GitHub Enterprise Server or
+an older account will return `404` instead. Neither failure is a reason to start from
+zero, so there are two routes that never touch the API.
+
+**Import a file.** If you can reach a usage report at all — a download from the billing
+page, an export a colleague with billing access sent you — the file reader takes it:
 
 ```bash
 ccred import --file ~/Downloads/usage-2026-08.csv
 ```
 
-The file reader takes GitHub's CSV export, the billing API's JSON response saved
-verbatim, or any CSV with a date, a model or SKU, and a quantity. Headers are matched
-loosely, so `Net Amount`, `netAmount` and `net_amount` are the same column, and a
-spreadsheet that saved semicolons instead of commas still reads. If your file happens
-to carry token counts, they come in too.
+It takes GitHub's CSV export, the billing API's JSON response saved verbatim, or any
+CSV with a date, a model or SKU, and a quantity. Headers are matched loosely, so
+`Net Amount`, `netAmount` and `net_amount` are the same column, and a spreadsheet that
+saved semicolons instead of commas still reads. If your file happens to carry token
+counts, they come in too.
+
+**Type the number in.** If all you can do is *read* a total off a screen — a usage
+page with no export, a figure an admin quoted you — enter it directly:
+
+```bash
+ccred import --credits 142                      # a total
+ccred import --credits opus=60,sonnet=33        # or split by model, if you know it
+```
+
+A hand-entered figure is treated as an **opening balance**, not a day's work: it is
+dated to the first day of the cycle and can never show up as your busiest day. It
+counts toward your budget, pace and projection, which is the whole point — you are
+still spending against the same 300.
+
+Check the number again in a week and re-run it. The same gap arithmetic applies, so
+`--credits 160` after `--credits 142` adds 18, and running the same number twice
+changes nothing. Splitting by model is optional; without it the credits land against
+`Premium request (model not reported)` at 1×, which keeps the total honest even though
+it cannot tell you which model earned it.
+
+Both routes leave `ccred log` working exactly as before, so from the day you install,
+new work carries the full session shape regardless of what your org lets you read.
 
 | Flag | What it does |
 | --- | --- |
 | `--file <path>` | Import from a downloaded report instead of the API. |
+| `--credits N` | Enter a total by hand as an opening balance. `--credits opus=60,sonnet=33` splits it by model. |
 | `--dry-run` | Show exactly what would be added and write nothing. Still reads from GitHub. |
 | `--replace` | Discard earlier backfills for the cycle and re-import, for when GitHub's report was revised or you imported the wrong scope. |
 | `--clear` | Remove backfilled entries and keep everything you logged by hand. |

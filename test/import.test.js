@@ -11,8 +11,11 @@ import {
   bucketRecords,
   planImport,
   applyImport,
+  manualRecords,
   UNATTRIBUTED,
 } from '../src/core/import.js';
+import { parseCreditSpecs } from '../src/commands/import.js';
+import { describeUsageFailure } from '../src/commands/sync.js';
 import { computeMetrics, localDateKey } from '../src/core/metrics.js';
 import { loadModelTable } from '../src/core/models.js';
 import { defaultConfig } from '../src/core/config.js';
@@ -371,4 +374,111 @@ test('a cycle with no import at all reports no import block', () => {
   const period = emptyPeriod();
   period.sessions.push(loggedSession('claude-sonnet-4.5', [loggedPrompt('claude-sonnet-4.5', 1, new Date(2026, 7, 20, 9, 0))]));
   assert.equal(computeMetrics(period, cfg, { table }).imported, null);
+});
+
+// --------------------------------------- the way in when the API says no
+
+test('an exact model id beats the loose sku matcher, so short ids survive', () => {
+  const period = emptyPeriod();
+  // "o3" is two characters - the SKU matcher ignores keys that short, so an
+  // explicit model column has to win outright or the spend lands unattributed.
+  importInto(period, [{ date: '2026-08-15', product: 'copilot', sku: 'Premium Request', model: 'o3', quantity: 5 }]);
+  assert.equal(computeMetrics(period, cfg, { table }).models[0].id, 'o3');
+});
+
+test('a hand-entered total lands as an opening balance at the start of the cycle', () => {
+  const period = emptyPeriod();
+  const records = manualRecords([{ model: null, credits: 142 }], period);
+  const { buckets } = bucketRecords(records, { table, start: period.start, end: period.end });
+  applyImport(period, planImport(period, buckets), cfg, { source: 'manual' });
+
+  const m = computeMetrics(period, cfg, { table, now: new Date(2026, 7, 27) });
+  assert.equal(m.burn.credits, 142);
+  assert.equal(m.imported.opening, 142);
+  assert.equal(m.daily[0].date, '2026-08-14', 'dated to the first day of the cycle');
+  assert.equal(m.daily[0].opening, 142);
+  assert.equal(m.sessions.total, 0, 'still not a session');
+});
+
+test('an opening balance never wins busiest day', () => {
+  const period = emptyPeriod();
+  const records = manualRecords([{ model: null, credits: 142 }], period);
+  const { buckets } = bucketRecords(records, { table, start: period.start, end: period.end });
+  applyImport(period, planImport(period, buckets), cfg, { source: 'manual' });
+  period.sessions.push(
+    loggedSession('claude-sonnet-4.5', [loggedPrompt('claude-sonnet-4.5', 1, new Date(2026, 7, 20, 9, 0))]),
+  );
+
+  const m = computeMetrics(period, cfg, { table, now: new Date(2026, 7, 27) });
+  assert.equal(m.burn.busiestDay.date, '2026-08-20', 'the real day of work, not the 142-credit balance');
+  assert.equal(m.burn.busiestDay.credits, 1);
+});
+
+test('a cycle whose only entry is an opening balance reports no busiest day', () => {
+  const period = emptyPeriod();
+  const records = manualRecords([{ model: null, credits: 90 }], period);
+  const { buckets } = bucketRecords(records, { table, start: period.start, end: period.end });
+  applyImport(period, planImport(period, buckets), cfg, { source: 'manual' });
+  assert.equal(computeMetrics(period, cfg, { table }).burn.busiestDay, null);
+});
+
+test('re-entering a higher balance adds only the increase', () => {
+  const period = emptyPeriod();
+  const enter = (credits) => {
+    const { buckets } = bucketRecords(manualRecords([{ model: null, credits }], period), {
+      table,
+      start: period.start,
+      end: period.end,
+    });
+    const plan = planImport(period, buckets);
+    applyImport(period, plan, cfg, { source: 'manual' });
+    return plan;
+  };
+
+  enter(142);
+  const second = enter(160);
+  assert.equal(second.totals.credits, 18);
+  assert.equal(computeMetrics(period, cfg, { table }).burn.credits, 160);
+
+  const third = enter(160);
+  assert.equal(third.totals.credits, 0, 'entering the same number again changes nothing');
+});
+
+test('a per-model balance is attributed and priced by multiplier', () => {
+  const period = emptyPeriod();
+  const records = manualRecords(
+    [
+      { model: 'claude-opus-4.1', credits: 60 },
+      { model: 'claude-sonnet-4.5', credits: 33 },
+    ],
+    period,
+  );
+  const { buckets } = bucketRecords(records, { table, start: period.start, end: period.end });
+  applyImport(period, planImport(period, buckets), cfg, { source: 'manual' });
+
+  const m = computeMetrics(period, cfg, { table });
+  assert.equal(m.burn.credits, 93);
+  assert.equal(m.imported.unattributed, 0);
+  const opus = m.models.find((mo) => mo.id === 'claude-opus-4.1');
+  assert.equal(opus.credits, 60);
+  assert.equal(opus.requests, 6, '60 credits at 10x is 6 premium requests');
+});
+
+test('both restricted-access failures name a route that needs no API', () => {
+  for (const status of [403, 404]) {
+    const err = describeUsageFailure([{ status, message: 'GitHub billing API: nope' }]);
+    assert.match(err.message, /--file usage\.csv/, `status ${status} should offer the file route`);
+    assert.match(err.message, /--credits 142/, `status ${status} should offer the manual route`);
+  }
+});
+
+test('a bare --credits is a usage error, not a silent no-op', () => {
+  assert.throws(() => parseCreditSpecs(true, table), /--credits expects a number/);
+  assert.throws(() => parseCreditSpecs(['opus=nope'], table), /expects a number/);
+});
+
+test('--credits resolves model names the same way logging does', () => {
+  assert.deepEqual(parseCreditSpecs(['opus=60'], table), [{ model: 'claude-opus-4.1', credits: 60 }]);
+  assert.deepEqual(parseCreditSpecs(['142'], table), [{ model: null, credits: 142 }]);
+  assert.throws(() => parseCreditSpecs(['nosuchmodel=5'], table), /Unknown model/);
 });
