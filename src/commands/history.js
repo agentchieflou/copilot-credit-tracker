@@ -48,15 +48,21 @@ export function cmdHistory(flags, positionals, { json }) {
           fmtNum(metrics.sessions.avgPrompts),
           fmtPct(metrics.sessions.singleRate),
           metrics.models[0] ? metrics.models[0].label : c.dim('-'),
+          // A cycle that was largely backfilled has thin session columns for a
+          // reason; say so rather than let it read as a quiet month.
+          metrics.imported ? c.dim(`${fmtPct(metrics.imported.share)} backfilled`) : '',
         ];
       }),
       {
-        head: ['cycle', '', 'credits', 'cap', 'used', 'prompts', 'sess', 'p/sess', '1-shot', 'top model'],
-        align: ['left', 'left', 'right', 'left', 'right', 'right', 'right', 'right', 'right', 'left'],
+        head: ['cycle', '', 'credits', 'cap', 'used', 'prompts', 'sess', 'p/sess', '1-shot', 'top model', ''],
+        align: ['left', 'left', 'right', 'left', 'right', 'right', 'right', 'right', 'right', 'left', 'left'],
       },
     ),
   );
   console.log(c.dim('  * live cycle, still accumulating.'));
+  if (rows.some((r) => r.metrics.imported)) {
+    console.log(c.dim('  prompts/sess/p-sess/1-shot cover logged prompts only; backfilled days have no shape.'));
+  }
 
   if (rows.length >= 2) {
     const last = rows[rows.length - 1].metrics;

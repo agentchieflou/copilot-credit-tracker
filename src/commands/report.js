@@ -46,7 +46,16 @@ export function cmdReport(flags, positionals, { json }) {
   );
   console.log('');
   console.log(kv('window', `${fmtDate(progress.start)} - ${fmtDate(progress.end)}  ${c.dim(`${Math.round(progress.daysTotal)} days`)}`));
-  console.log(kv('requests', `${fmtNum(burn.requests)} premium ${plural(burn.requests, 'request')} over ${fmtNum(burn.prompts)} logged ${plural(burn.prompts, 'prompt')}`));
+  console.log(
+    kv(
+      'requests',
+      `${fmtNum(burn.requests)} premium ${plural(burn.requests, 'request')}  ${c.dim(
+        m.imported
+          ? `(${fmtNum(burn.loggedCredits)} credits logged + ${fmtNum(burn.importedCredits)} backfilled)`
+          : `over ${fmtNum(burn.prompts)} logged ${plural(burn.prompts, 'prompt')}`,
+      )}`,
+    ),
+  );
   if (burn.tokenCredits > 0) {
     console.log(kv('credit split', `${fmtNum(burn.requestCredits)} from requests + ${fmtNum(burn.tokenCredits)} from tokens`));
   }
@@ -69,8 +78,14 @@ export function cmdReport(flags, positionals, { json }) {
     console.log('');
     console.log(
       table(
-        m.daily.map((d) => [c.dim(d.date), bar(d.credits, max, 22), fmtNum(d.credits), c.dim(`${d.prompts}p`)]),
-        { align: ['left', 'left', 'right', 'right'] },
+        m.daily.map((d) => [
+          c.dim(d.date),
+          bar(d.credits, max, 22),
+          fmtNum(d.credits),
+          c.dim(d.prompts ? `${d.prompts}p` : ''),
+          d.imported ? c.dim('backfilled') : '',
+        ]),
+        { align: ['left', 'left', 'right', 'right', 'left'] },
       ),
     );
   }
@@ -127,15 +142,14 @@ export function cmdReport(flags, positionals, { json }) {
           c.dim(`x${mod.multiplier}`),
           fmtNum(mod.credits),
           c.dim(fmtPct(mod.share)),
-          fmtNum(mod.prompts),
-          fmtNum(mod.soleSessions),
-          fmtNum(mod.avgPromptsPerSession),
-          fmtPct(mod.singleRate),
-          fmtNum(mod.creditsPerSession),
+          fmtNum(mod.requests),
+          ...(mod.soleSessions
+            ? [fmtNum(mod.soleSessions), fmtNum(mod.avgPromptsPerSession), fmtPct(mod.singleRate), fmtNum(mod.creditsPerSession)]
+            : [c.dim('-'), c.dim('-'), c.dim('-'), c.dim('-')]),
           mod.avgChars == null ? c.dim('-') : fmtNum(mod.avgChars),
         ]),
         {
-          head: ['model', 'mult', 'credits', 'share', 'prompts', 'sess', 'p/sess', '1-shot', 'cr/sess', 'avg ch'],
+          head: ['model', 'mult', 'credits', 'share', 'reqs', 'sess', 'p/sess', '1-shot', 'cr/sess', 'avg ch'],
           align: ['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right'],
         },
       ),
@@ -241,6 +255,29 @@ export function cmdReport(flags, positionals, { json }) {
     );
     console.log(kv('credits/solved', fmtNum(m.outcomes.creditsPerSolved)));
     console.log(kv('dead ends', c.red(`${fmtNum(m.outcomes.wastedCredits)} credits`)));
+  }
+
+  if (m.imported) {
+    console.log(heading('Backfilled from billing data'));
+    console.log(
+      kv(
+        'imported',
+        `${fmtNum(m.imported.credits)} credits ${c.dim(
+          `(${fmtPct(m.imported.share)} of this cycle, ${fmtNum(m.imported.requests)} premium ${plural(
+            m.imported.requests,
+            'request',
+          )})`,
+        )}`,
+      ),
+    );
+    console.log(kv('covering', `${m.imported.days} ${plural(m.imported.days, 'day')}, ${m.imported.firstDay} to ${m.imported.lastDay}`));
+    console.log(kv('source', `${m.imported.sources.join(', ') || 'unknown'}${m.imported.at ? c.dim(`  at ${fmtDate(m.imported.at, { withTime: true })}`) : ''}`));
+    if (m.imported.unattributed > 0) {
+      console.log(kv('unattributed', c.yellow(`${fmtNum(m.imported.unattributed)} credits with no model named in the SKU`)));
+    }
+    console.log('');
+    console.log(c.dim('  These days count toward burn, daily shape and per-model spend. They are left out'));
+    console.log(c.dim('  of session shape and prompt length above: billing data records neither.'));
   }
 
   if (m.sync) {

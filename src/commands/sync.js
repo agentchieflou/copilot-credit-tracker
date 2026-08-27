@@ -53,7 +53,7 @@ export function usagePath(cfg) {
   return `/users/${encodeURIComponent(gh.username)}/settings/billing/usage`;
 }
 
-async function ghFetch(url, token) {
+export async function ghFetch(url, token) {
   const res = await fetch(url, {
     headers: {
       Accept: 'application/vnd.github+json',
@@ -79,67 +79,50 @@ async function ghFetch(url, token) {
   return body;
 }
 
-async function detectUsername(cfg, token) {
+export async function detectUsername(cfg, token) {
   const me = await ghFetch(`${cfg.github.apiBase}/user`, token);
   return me?.login || null;
 }
 
-export function isPremiumRequestItem(item) {
-  const product = String(item.product || '').toLowerCase();
-  const sku = String(item.sku || '').toLowerCase();
-  return product.includes('copilot') && (sku.includes('premium') || sku.includes('request'));
+/** `--scope`, `--org` and `--enterprise` override config for one invocation. */
+export function applyScopeFlags(cfg, flags) {
+  let out = cfg;
+  const scope = asString(flags.scope, null);
+  if (scope) out = { ...out, github: { ...out.github, scope } };
+  const org = asString(flags.org, null);
+  if (org) out = { ...out, github: { ...out.github, org, scope: scope || 'organization' } };
+  const enterprise = asString(flags.enterprise, null);
+  if (enterprise) out = { ...out, github: { ...out.github, enterprise, scope: scope || 'enterprise' } };
+  return out;
 }
 
-export async function cmdSync(flags, positionals, { json }) {
-  const state = loadState();
-  let cfg = state.cfg;
-  const period = resolvePeriod(positionals[0] || asString(flags.period, null), state) || state.period;
+/**
+ * Learn and remember the login for a personal scope. Skipped on a dry run,
+ * which must neither touch the network nor write to the config file.
+ */
+export async function ensureUsername(cfg, token, { dryRun = false } = {}) {
+  if (cfg.github.scope !== 'personal' || cfg.github.username || !token || dryRun) return cfg;
+  const login = await detectUsername(cfg, token);
+  if (!login) return cfg;
+  const stored = loadConfig();
+  stored.github.username = login;
+  saveConfig(stored);
+  return { ...cfg, github: { ...cfg.github, username: login } };
+}
 
-  const scopeOverride = asString(flags.scope, null);
-  if (scopeOverride) cfg = { ...cfg, github: { ...cfg.github, scope: scopeOverride } };
-  const orgOverride = asString(flags.org, null);
-  if (orgOverride) cfg = { ...cfg, github: { ...cfg.github, org: orgOverride, scope: scopeOverride || 'organization' } };
-  const entOverride = asString(flags.enterprise, null);
-  if (entOverride) cfg = { ...cfg, github: { ...cfg.github, enterprise: entOverride, scope: scopeOverride || 'enterprise' } };
-
-  const { token, source } = resolveToken(asString(flags.token, null));
-  if (!token && flags['dry-run'] !== true) {
-    throw new Error(
-      'No GitHub token found. Set GITHUB_TOKEN (needs the "Plan" read-only permission for billing usage), or sign in with `gh auth login`.',
-    );
-  }
-
-  // Skip the whoami lookup on a dry run - it should not touch the network or
-  // write to the config file.
-  if (cfg.github.scope === 'personal' && !cfg.github.username && token && flags['dry-run'] !== true) {
-    const login = await detectUsername(cfg, token);
-    if (login) {
-      const stored = loadConfig();
-      stored.github.username = login;
-      saveConfig(stored);
-      cfg = { ...cfg, github: { ...cfg.github, username: login } };
-    }
-  }
-
+/** The billing-usage URLs covering a cycle, which can straddle two months. */
+export function usageUrls(cfg, period, { now = Date.now(), placeholder = false } = {}) {
   const path =
-    flags['dry-run'] === true && cfg.github.scope === 'personal' && !cfg.github.username
+    placeholder && cfg.github.scope === 'personal' && !cfg.github.username
       ? '/users/<your-login>/settings/billing/usage'
       : usagePath(cfg);
   const start = new Date(period.start);
   const end = new Date(period.end);
-  const months = monthsBetween(start, new Date(Math.min(Date.now(), end.getTime())));
-  const urls = months.map(({ year, month }) => `${cfg.github.apiBase}${path}?year=${year}&month=${month}`);
+  const months = monthsBetween(start, new Date(Math.min(now, end.getTime())));
+  return { path, months, urls: months.map(({ year, month }) => `${cfg.github.apiBase}${path}?year=${year}&month=${month}`) };
+}
 
-  if (flags['dry-run'] === true) {
-    if (json) return { urls, scope: cfg.github.scope, tokenSource: source };
-    console.log(heading('Dry run'));
-    console.log(kv('scope', cfg.github.scope));
-    console.log(kv('token', source ? c.green(source) : c.red('none found')));
-    for (const u of urls) console.log(`  GET ${u}`);
-    console.log('');
-    return null;
-  }
-
+export async function fetchUsageItems(urls, token) {
   const items = [];
   const errors = [];
   for (const url of urls) {
@@ -150,17 +133,62 @@ export async function cmdSync(flags, positionals, { json }) {
       errors.push({ url, message: err.message, status: err.status });
     }
   }
+  return { items, errors };
+}
 
-  if (errors.length && !items.length) {
-    const first = errors[0];
-    const hint =
-      first.status === 404
-        ? '\n  This endpoint needs the enhanced billing platform and a token with "Plan" read access.\n  GitHub Enterprise Server may not expose it at all - the local ledger still works without sync.'
-        : first.status === 403
-          ? '\n  The token is missing the billing/Plan read permission, or your org restricts it.'
-          : '';
-    throw new Error(`${first.message}${hint}`);
+/** Turn the first failure into something that says what to do about it. */
+export function describeUsageFailure(errors) {
+  const first = errors[0];
+  const hint =
+    first.status === 404
+      ? [
+          '',
+          '  This endpoint needs the enhanced billing platform and a token with "Plan" read access.',
+          '  GitHub Enterprise Server may not expose it at all - download the usage report from the',
+          '  web UI and run `ccred import --file <report.csv>` instead.',
+        ].join('\n')
+      : first.status === 403
+        ? '\n  The token is missing the billing/Plan read permission, or your org restricts it.'
+        : '';
+  return new Error(`${first.message}${hint}`);
+}
+
+export function isPremiumRequestItem(item) {
+  const product = String(item.product || '').toLowerCase();
+  const sku = String(item.sku || '').toLowerCase();
+  return product.includes('copilot') && (sku.includes('premium') || sku.includes('request'));
+}
+
+export async function cmdSync(flags, positionals, { json }) {
+  const state = loadState();
+  const period = resolvePeriod(positionals[0] || asString(flags.period, null), state) || state.period;
+  let cfg = applyScopeFlags(state.cfg, flags);
+  const dryRun = flags['dry-run'] === true;
+
+  const { token, source } = resolveToken(asString(flags.token, null));
+  if (!token && !dryRun) {
+    throw new Error(
+      'No GitHub token found. Set GITHUB_TOKEN (needs the "Plan" read-only permission for billing usage), or sign in with `gh auth login`.',
+    );
   }
+  cfg = await ensureUsername(cfg, token, { dryRun });
+
+  const { months, urls } = usageUrls(cfg, period, { placeholder: dryRun });
+  const start = new Date(period.start);
+  const end = new Date(period.end);
+
+  if (dryRun) {
+    if (json) return { urls, scope: cfg.github.scope, tokenSource: source };
+    console.log(heading('Dry run'));
+    console.log(kv('scope', cfg.github.scope));
+    console.log(kv('token', source ? c.green(source) : c.red('none found')));
+    for (const u of urls) console.log(`  GET ${u}`);
+    console.log('');
+    return null;
+  }
+
+  const { items, errors } = await fetchUsageItems(urls, token);
+  if (errors.length && !items.length) throw describeUsageFailure(errors);
 
   const inRange = items.filter((item) => {
     if (!item.date) return true;
@@ -223,6 +251,13 @@ export async function cmdSync(flags, positionals, { json }) {
   if (errors.length) {
     console.log('');
     for (const e of errors) console.log(c.yellow(`  partial: ${e.message}`));
+  }
+  // Sync only reports the gap; import is what closes it.
+  if (drift > 0) {
+    console.log('');
+    console.log(
+      c.dim(`  Bring those ${fmtNum(drift)} credits into the ledger:  ccred import${period.id === state.period.id ? '' : ` ${period.id}`}`),
+    );
   }
   console.log('');
   return null;

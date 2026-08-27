@@ -1,5 +1,5 @@
 import { periodProgress, MS_PER_DAY } from './period.js';
-import { allPrompts } from './ledger.js';
+import { allPrompts, isImported, loggedSessions } from './ledger.js';
 import { round4 } from './models.js';
 
 export const LENGTH_BUCKETS = [
@@ -47,9 +47,19 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
   const progress = periodProgress(period, now);
   const allowance = Number(period.allowance) || 0;
 
+  // Spend backfilled from GitHub's billing data is real money and belongs in
+  // the burn numbers, but it carries no session structure and no prompt text.
+  // Everything about session shape or prompt length is therefore computed over
+  // logged entries only, so a backfilled month cannot invent a habit.
+  const imported = prompts.filter(isImported);
+  const logged = prompts.filter((p) => !isImported(p));
+  const loggedWithPrompts = loggedSessions(period).filter((s) => s.prompts.length > 0);
+
   const reqCredits = sum(prompts, (p) => p.credits);
   const tokCredits = sum(prompts, (p) => p.tokenCredits);
   const credits = round4(reqCredits + tokCredits);
+  const importedCredits = sum(imported, promptCredits);
+  const loggedCredits = round4(credits - importedCredits);
   const remaining = allowance ? round4(Math.max(allowance - credits, 0)) : null;
   const over = allowance ? round4(Math.max(credits - allowance, 0)) : 0;
 
@@ -72,7 +82,7 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
   }
 
   // ---- session shape -------------------------------------------------------
-  const withPrompts = sessions.filter((s) => s.prompts.length > 0);
+  const withPrompts = loggedWithPrompts;
   const counts = withPrompts.map((s) => s.prompts.length);
   const single = withPrompts.filter((s) => s.prompts.length === 1);
   const multi = withPrompts.filter((s) => s.prompts.length > 1);
@@ -90,17 +100,20 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
   const sessionStats = {
     total: withPrompts.length,
     open: sessions.filter((s) => s.status === 'open').length,
+    /** Backfilled day-and-model rows, which are deliberately not sessions. */
+    importedEntries: imported.length,
     single: single.length,
     multi: multi.length,
     singleRate: withPrompts.length ? round4(single.length / withPrompts.length) : 0,
-    avgPrompts: withPrompts.length ? round4(prompts.length / withPrompts.length) : 0,
+    avgPrompts: withPrompts.length ? round4(logged.length / withPrompts.length) : 0,
     medianPrompts: median(counts),
     maxPrompts: counts.length ? Math.max(...counts) : 0,
     singleCredits: sum(single, sessionCredits),
     multiCredits: sum(multi, sessionCredits),
     followUpCredits,
     // Share of spend that went to prompts after the opener - the re-prompt tax.
-    followUpShare: credits ? round4(followUpCredits / credits) : 0,
+    // Measured against logged spend: a backfill has no openers to be after.
+    followUpShare: loggedCredits ? round4(followUpCredits / loggedCredits) : 0,
     avgCreditsPerSession: avg(withPrompts, sessionCredits),
     avgDurationMin: durations.length
       ? round4(durations.reduce((a, b) => a + b, 0) / durations.length / 60000)
@@ -121,6 +134,7 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
   const models = modelIds
     .map((id) => {
       const mine = prompts.filter((p) => p.model === id);
+      const mineLogged = logged.filter((p) => p.model === id);
       const mySessions = withPrompts.filter((s) => s.prompts.some((p) => p.model === id));
       // Sessions run entirely on this model are the only fair basis for
       // "how many prompts does it take to get there".
@@ -138,6 +152,8 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
         label: meta?.label || id,
         multiplier: mine[0]?.multiplier ?? meta?.multiplier ?? 0,
         prompts: mine.length,
+        loggedPrompts: mineLogged.length,
+        importedCredits: sum(mine.filter(isImported), promptCredits),
         requests: sum(mine, (p) => p.count),
         credits: c,
         requestCredits: sum(mine, (p) => p.credits),
@@ -148,7 +164,7 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
         avgPromptsPerSession: soleSessions.length
           ? round4(sum(soleSessions, (s) => s.prompts.length) / soleSessions.length)
           : mySessions.length
-            ? round4(mine.length / mySessions.length)
+            ? round4(mineLogged.length / mySessions.length)
             : 0,
         singleRate: soleSessions.length
           ? round4(soleSessions.filter((s) => s.prompts.length === 1).length / soleSessions.length)
@@ -166,10 +182,10 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
     .sort((a, b) => b.credits - a.credits || b.prompts - a.prompts);
 
   // ---- prompt length -------------------------------------------------------
-  const charList = prompts.map((p) => p.chars).filter((c) => typeof c === 'number');
-  const wordList = prompts.map((p) => p.words).filter((w) => typeof w === 'number');
+  const charList = logged.map((p) => p.chars).filter((c) => typeof c === 'number');
+  const wordList = logged.map((p) => p.words).filter((w) => typeof w === 'number');
   const lengthBuckets = LENGTH_BUCKETS.map((b) => {
-    const inBucket = prompts.filter(
+    const inBucket = logged.filter(
       (p) => typeof p.chars === 'number' && p.chars >= b.min && p.chars < b.max,
     );
     // Bucket sessions by their OPENING prompt: does a longer opener buy fewer follow-ups?
@@ -210,12 +226,34 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
   const dailyMap = new Map();
   for (const p of prompts) {
     const key = localDateKey(p.at);
-    const row = dailyMap.get(key) || { date: key, credits: 0, prompts: 0 };
+    const row = dailyMap.get(key) || { date: key, credits: 0, prompts: 0, requests: 0, imported: 0 };
     row.credits = round4(row.credits + promptCredits(p));
-    row.prompts += 1;
+    row.requests = round4(row.requests + (p.count || 0));
+    if (isImported(p)) row.imported = round4(row.imported + promptCredits(p));
+    else row.prompts += 1;
     dailyMap.set(key, row);
   }
   const daily = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+
+  // ---- backfill ------------------------------------------------------------
+  const importedDays = [...new Set(imported.map((p) => localDateKey(p.at)))].sort();
+  const importSummary = imported.length
+    ? {
+        credits: importedCredits,
+        requests: sum(imported, (p) => p.count),
+        entries: imported.length,
+        days: importedDays.length,
+        firstDay: importedDays[0],
+        lastDay: importedDays[importedDays.length - 1],
+        share: credits ? round4(importedCredits / credits) : 0,
+        unattributed: sum(
+          imported.filter((p) => p.model === 'copilot-premium-request'),
+          promptCredits,
+        ),
+        sources: [...new Set(period.sessions.filter(isImported).map((s) => s.import?.source).filter(Boolean))],
+        at: period.lastImport?.at || null,
+      }
+    : null;
 
   const rated = withPrompts.filter((s) => s.outcome);
   const solved = rated.filter((s) => s.outcome === 'solved');
@@ -243,7 +281,11 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
       credits,
       requestCredits: reqCredits,
       tokenCredits: tokCredits,
-      prompts: prompts.length,
+      loggedCredits,
+      importedCredits,
+      /** Prompts you logged. A backfilled day is spend, not a prompt. */
+      prompts: logged.length,
+      entries: prompts.length,
       requests: sum(prompts, (p) => p.count),
       allowance,
       remaining,
@@ -263,7 +305,7 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
     models,
     promptLength: {
       counted: charList.length,
-      coverage: prompts.length ? round4(charList.length / prompts.length) : 0,
+      coverage: logged.length ? round4(charList.length / logged.length) : 0,
       avgChars: charList.length ? Math.round(charList.reduce((a, b) => a + b, 0) / charList.length) : 0,
       medianChars: charList.length ? Math.round(median(charList)) : 0,
       p90Chars: charList.length ? Math.round(percentile(charList, 90)) : 0,
@@ -273,6 +315,7 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
     tokens,
     daily,
     outcomes,
+    imported: importSummary,
     sync: period.sync || null,
   };
 }
