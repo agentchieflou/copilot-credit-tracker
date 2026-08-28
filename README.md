@@ -90,11 +90,66 @@ Copilot credits - 2026-08 (Copilot Pro, Aug 14 to Sep 14)
   Claude Haiku 4.5   x0.33   3.33 cr   3%  10 requests
 ```
 
+## A note on billing models
+
+GitHub has two. The current platform bills **AI credits**, priced per token. The
+legacy platform bills **premium requests**, priced by a per-model multiplier. The
+Copilot CLI says so directly — `copilot help billing`: *"Usage is measured in AI
+credits. If you're on the legacy billing platform, you may see premium requests
+instead."*
+
+`ccred` reads and reports both. `harvest` picks up whichever your CLI recorded, and
+the per-model multiplier table only applies to the legacy unit.
+
 ## Starting mid-cycle
 
 Installing this on the 20th should not mean pretending the month began on the 20th.
-`ccred import` reads GitHub's billing usage for the current cycle and writes it into
-the ledger as real spend:
+There are three ways to bring the cycle so far into the ledger, in order of how much
+they ask of you.
+
+### 1. Harvest the Copilot CLI (no token, no network, no permissions)
+
+The Copilot CLI already records what every session cost, on your own machine, under
+`~/.copilot/session-state/<id>/events.jsonl`. Reading it needs nothing but your home
+directory:
+
+```bash
+ccred harvest
+```
+
+```
+Harvested 2026-08 from the Copilot CLI
+--------------------------------------
+  source             ~/.copilot (no token, no network, no billing permission)
+  sessions on disk   5 finished, 4 in this cycle
+  added              3 sessions (12.95 AI credits, 46 premium requests)
+  tokens             154.0k of conversation, read from the CLI's own record
+  turn counts        2 sessions did not record how many prompts it took
+
+  day         model              AI credits  prem reqs  turns  tokens
+  ----------  -----------------  ----------  ---------  -----  ------
+  2026-08-18  claude-sonnet-4.5         2.4         12      3   48.0k
+  2026-08-20  claude-opus-4.1          9.75         30      -   91.0k
+  2026-08-25  gpt-5                     0.8          4      -   15.0k
+```
+
+This is strictly better than the billing API: it carries **real token counts and AI
+credits**, which billing does not report at all, plus real session boundaries, the
+model, the branch and the lines changed. Sessions are keyed by the CLI's own session
+id, so running it again adds nothing and picks up whatever has happened since.
+
+What it does *not* give you is your plan's remaining balance — the CLI shows that in
+its footer but does not pass it to integrations. Harvesting tells you what you have
+spent, which is the number this tool is built around.
+
+Point it elsewhere with `CCRED_COPILOT_HOME` if your CLI keeps state somewhere else.
+Verified against Copilot CLI 1.0.81; every field is read defensively, so a CLI that
+changes shape harvests nothing rather than writing wrong numbers.
+
+### 2. Import from GitHub billing
+
+If you have billing read access — an owner, a billing manager, or a personal account
+— `ccred import` reads the billing usage API for the cycle and writes it in:
 
 ```bash
 ccred import
@@ -123,7 +178,7 @@ Do it as part of setup with `ccred init --plan pro --reset-day 14 --import`, or 
 time afterwards. Past cycles work too: `ccred import 2026-07` writes into that
 cycle's archive.
 
-### If you are blocked from the billing API
+### 3. If you are blocked from the billing API
 
 Billing usage is an owner / billing-manager surface. A developer holding a Copilot
 Business or Enterprise seat is exactly the person who wants this tool and exactly the
@@ -261,6 +316,7 @@ whatever dashboard you already have.
 | `ccred config path` | Where the data lives. |
 | `ccred models` | Multipliers and plan allowances. |
 | `ccred models --set claude-opus-4.1=10` | Correct a multiplier, or register a model GitHub added after this release. |
+| `ccred harvest [cycle]` | Read the Copilot CLI's own session logs on this machine. No token needed. |
 | `ccred sync` | Reconcile the ledger against GitHub's billing usage API. |
 | `ccred import [cycle]` | Pull a cycle's spend out of GitHub and into the ledger. `--file <path>` reads a downloaded report instead. |
 
@@ -420,10 +476,11 @@ CSV reading, SKU-to-model matching, gap filling, idempotency, and the guarantee 
 imported spend never reaches the session-shape numbers.
 
 ```
-src/core/     period maths, ledger, state + rollover, metrics, backfill
+src/core/     period maths, ledger, state + rollover, metrics, backfill,
+              copilot.js - reading the CLI's local session logs
 src/commands/ one file per command
 src/util/     argv parsing, terminal formatting, text measurement, csv reading
-data/         bundled multiplier table
+data/         bundled multiplier table (legacy premium-request unit only)
 ```
 
 `src/index.js` exposes the same pieces programmatically if you want to feed the data

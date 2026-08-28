@@ -20,7 +20,7 @@
  */
 
 import { round4, loadModelTable } from './models.js';
-import { newId, tokenCredits, ORIGIN_IMPORT, isImported } from './ledger.js';
+import { newId, tokenCredits, ORIGIN_IMPORT, isDerived } from './ledger.js';
 import { localDateKey } from './metrics.js';
 
 export { ORIGIN_IMPORT };
@@ -250,7 +250,7 @@ export function ledgerByDayModel(period) {
       const row = map.get(key) || { credits: 0, requests: 0, logged: 0, imported: 0 };
       row.credits = round4(row.credits + (prompt.credits || 0));
       row.requests = round4(row.requests + (prompt.count || 0));
-      const bucket = isImported(session) || isImported(prompt) ? 'imported' : 'logged';
+      const bucket = isDerived(session) || isDerived(prompt) ? 'imported' : 'logged';
       row[bucket] = round4(row[bucket] + (prompt.credits || 0));
       map.set(key, row);
     }
@@ -266,7 +266,7 @@ export function ledgerByDayModel(period) {
  *                      revised GitHub report or a changed scope can win
  */
 export function planImport(period, buckets, { strategy = 'gap' } = {}) {
-  const dropping = strategy === 'replace' ? period.sessions.filter(isImported) : [];
+  const dropping = strategy === 'replace' ? period.sessions.filter(isDerived) : [];
   const dropped = new Set(dropping.map((s) => s.id));
   const held = ledgerByDayModel({ ...period, sessions: period.sessions.filter((s) => !dropped.has(s.id)) });
 
