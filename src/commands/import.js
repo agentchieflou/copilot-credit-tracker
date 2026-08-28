@@ -3,7 +3,8 @@ import path from 'node:path';
 import { loadState, savePeriod, resolvePeriod, writeArchived } from '../core/state.js';
 import { computeMetrics } from '../core/metrics.js';
 import { round4 } from '../core/models.js';
-import { bucketRecords, planImport, applyImport } from '../core/import.js';
+import { bucketRecords, planImport, applyImport, manualRecords } from '../core/import.js';
+import { resolveModel } from '../core/models.js';
 import { importedSessions } from '../core/ledger.js';
 import { parseCsvRecords } from '../util/csv.js';
 import {
@@ -15,7 +16,7 @@ import {
   describeUsageFailure,
 } from './sync.js';
 import { c, fmtNum, fmtPct, fmtTokens, table, heading, kv, fmtDate, budgetBar, plural } from '../util/fmt.js';
-import { asString } from '../util/args.js';
+import { asString, asList } from '../util/args.js';
 
 const STRATEGIES = ['gap', 'replace'];
 const QUANTITY_MODES = ['billed', 'raw'];
@@ -52,6 +53,29 @@ export function readUsageFile(file) {
   return { records, format: 'csv', file: resolved };
 }
 
+/**
+ * `--credits 142` or `--credits opus=60,sonnet=33`. The model is resolved
+ * properly rather than SKU-matched, so short ids like `o3` work and a typo
+ * gets the usual "did you mean" instead of landing as unattributed.
+ */
+export function parseCreditSpecs(value, table) {
+  if (value === true) throw new Error('--credits expects a number, e.g. --credits 142 or --credits opus=60,sonnet=33');
+  const specs = [];
+  for (const raw of asList(value)) {
+    const eq = raw.lastIndexOf('=');
+    const hasModel = eq > 0;
+    const amount = Number(hasModel ? raw.slice(eq + 1) : raw);
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new Error(`--credits expects a number or <model>=<number>, got "${raw}"`);
+    }
+    specs.push({
+      model: hasModel ? resolveModel(raw.slice(0, eq).trim(), table).id : null,
+      credits: amount,
+    });
+  }
+  return specs;
+}
+
 function pickOne(value, allowed, flagName, fallback) {
   const v = asString(value, null);
   if (!v) return fallback;
@@ -72,14 +96,21 @@ export async function cmdImport(flags, positionals, { json }) {
   const quantity = pickOne(flags.quantity, QUANTITY_MODES, 'quantity', 'billed');
   const file = asString(flags.file ?? flags.from, null);
 
-  // ---- 1. get the usage records, from a file or from GitHub ----------------
+  // ---- 1. get the usage records: by hand, from a file, or from GitHub ------
   let records;
   let source;
   let sourceLabel;
   let errors = [];
   let cfg = state.cfg;
 
-  if (file) {
+  const creditSpecs = flags.credits === undefined ? [] : parseCreditSpecs(flags.credits, state.table);
+
+  if (creditSpecs.length) {
+    records = manualRecords(creditSpecs, period);
+    source = 'manual';
+    const total = creditSpecs.reduce((a, sp) => a + sp.credits, 0);
+    sourceLabel = `entered by hand ${c.dim(`(${fmtNum(total)} credits as an opening balance)`)}`;
+  } else if (file) {
     const read = readUsageFile(file);
     records = read.records;
     source = `file:${path.basename(read.file)}`;
@@ -92,7 +123,10 @@ export async function cmdImport(flags, positionals, { json }) {
         [
           'No GitHub token found. Set GITHUB_TOKEN (needs the "Plan" read-only permission for billing usage),',
           'or sign in with `gh auth login`.',
-          'No API access? Download the usage report from GitHub and run:  ccred import --file usage.csv',
+          '',
+          'Cannot get a token? Neither of these touches the API:',
+          '  ccred import --file usage.csv    from a usage report you downloaded',
+          '  ccred import --credits 142       from a number you can only read off a screen',
         ].join('\n  '),
       );
     }
@@ -131,7 +165,7 @@ export async function cmdImport(flags, positionals, { json }) {
 
   if (dryRun) {
     if (json) return { dryRun: true, period: period.id, strategy, quantity, plan: serializePlan(plan), rejected };
-    renderPlan(period, plan, { sourceLabel, rejected, before, dryRun: true, quantity, strategy, byDay });
+    renderPlan(period, plan, { sourceLabel, source, rejected, before, dryRun: true, quantity, strategy, byDay });
     return null;
   }
 
@@ -157,7 +191,7 @@ export async function cmdImport(flags, positionals, { json }) {
     };
   }
 
-  renderPlan(period, plan, { sourceLabel, rejected, before, after, errors, quantity, strategy, byDay });
+  renderPlan(period, plan, { sourceLabel, source, rejected, before, after, errors, quantity, strategy, byDay });
   return null;
 }
 
@@ -183,10 +217,11 @@ function serializePlan(plan) {
 function renderPlan(
   period,
   plan,
-  { sourceLabel, rejected, before, after, errors = [], dryRun = false, quantity, strategy, byDay = false },
+  { sourceLabel, source, rejected, before, after, errors = [], dryRun = false, quantity, strategy, byDay = false },
 ) {
   const { totals, additions, skipped } = plan;
   const verb = dryRun ? 'Would import' : 'Imported';
+  const manual = source === 'manual';
 
   console.log(heading(`${verb} ${period.id} ${c.dim(`(${fmtDate(period.start)} - ${fmtDate(period.end)})`)}`));
   console.log(kv('source', sourceLabel));
@@ -203,21 +238,39 @@ function renderPlan(
       ),
     );
   } else {
+    const spread = manual
+      ? c.dim('as an opening balance on the first day of the cycle')
+      : `over ${fmtNum(totals.days)} ${plural(totals.days, 'day')}`;
     console.log(
       kv(
         'added',
-        `${c.bold(`${fmtNum(totals.credits)} ${plural(totals.credits, 'credit')}`)} over ${fmtNum(totals.days)} ${plural(
-          totals.days,
-          'day',
-        )} ${c.dim(`(${fmtNum(totals.requests)} premium ${plural(totals.requests, 'request')}, ${totals.models} ${plural(totals.models, 'model')})`)}`,
+        `${c.bold(`${fmtNum(totals.credits)} ${plural(totals.credits, 'credit')}`)} ${spread} ${c.dim(
+          `(${fmtNum(totals.requests)} premium ${plural(totals.requests, 'request')}, ${totals.models} ${plural(totals.models, 'model')})`,
+        )}`,
       ),
     );
     if (totals.toppedUp) {
-      console.log(kv('topped up', c.dim(`${totals.toppedUp} ${plural(totals.toppedUp, 'day')} where you had already logged part of the spend`)));
+      console.log(
+        kv(
+          'topped up',
+          c.dim(
+            manual
+              ? 'the balance already held is kept; only the increase was added'
+              : `${totals.toppedUp} ${plural(totals.toppedUp, 'day')} where you had already logged part of the spend`,
+          ),
+        ),
+      );
     }
     if (totals.unattributed > 0) {
       console.log(
-        kv('unattributed', c.yellow(`${fmtNum(totals.unattributed)} credits GitHub reported without naming a model`)),
+        kv(
+          'unattributed',
+          c.yellow(
+            manual
+              ? `${fmtNum(totals.unattributed)} credits with no model given - add one with --credits opus=60`
+              : `${fmtNum(totals.unattributed)} credits GitHub reported without naming a model`,
+          ),
+        ),
       );
     }
   }
@@ -228,14 +281,11 @@ function renderPlan(
   }
 
   const tokenTotal = additions.reduce((a, b) => a + b.tokens.input + b.tokens.output + b.tokens.context, 0);
-  console.log(
-    kv(
-      'tokens',
-      tokenTotal > 0
-        ? `${fmtTokens(tokenTotal)} carried in from the source`
-        : c.dim('not reported - GitHub bills per premium request, not per token'),
-    ),
-  );
+  if (tokenTotal > 0) {
+    console.log(kv('tokens', `${fmtTokens(tokenTotal)} carried in from the source`));
+  } else if (!manual) {
+    console.log(kv('tokens', c.dim('not reported - GitHub bills per premium request, not per token')));
+  }
 
   if (after) {
     const { burn } = after;
@@ -302,10 +352,14 @@ function renderPlan(
   if (dryRun) {
     console.log(c.dim('  Nothing was written. Drop --dry-run to import.'));
   } else if (additions.length) {
-    console.log(
-      c.dim('  Backfilled days count toward burn, but carry no session shape or prompt length -'),
-    );
-    console.log(c.dim('  GitHub\'s billing data has neither. Everything you log from here does.'));
+    if (manual) {
+      console.log(c.dim('  An opening balance counts toward your budget, pace and projection. It has no daily'));
+      console.log(c.dim('  shape and no model efficiency, so it never shows up as a busiest day. Check the'));
+      console.log(c.dim('  number again later and re-run - only the difference is added.'));
+    } else {
+      console.log(c.dim('  Backfilled days count toward burn, but carry no session shape or prompt length -'));
+      console.log(c.dim('  the billing data has neither. Everything you log from here does.'));
+    }
     console.log('');
     console.log(c.dim('  ccred report        the full picture, including the month you just pulled in'));
   }

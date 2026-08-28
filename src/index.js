@@ -13,8 +13,18 @@ export {
   loggedSessions,
   importedSessions,
   isImported,
+  isHarvested,
+  isDerived,
   ORIGIN_IMPORT,
+  ORIGIN_HARVEST,
 } from './core/ledger.js';
+export {
+  readLocalSessions,
+  summarizeSession,
+  readEvents,
+  nanoToAiu,
+  copilotHome,
+} from './core/copilot.js';
 export { bucketRecords, planImport, applyImport, inferModel, normalizeRecord } from './core/import.js';
 export { parseCsvRecords } from './util/csv.js';
 export { cycleStartFor, cycleEndFor, periodIdFor, periodProgress, makePeriod } from './core/period.js';

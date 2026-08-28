@@ -83,7 +83,7 @@ export function cmdReport(flags, positionals, { json }) {
           bar(d.credits, max, 22),
           fmtNum(d.credits),
           c.dim(d.prompts ? `${d.prompts}p` : ''),
-          d.imported ? c.dim('backfilled') : '',
+          d.opening ? c.dim('opening balance') : d.imported ? c.dim('backfilled') : '',
         ]),
         { align: ['left', 'left', 'right', 'right', 'left'] },
       ),
@@ -271,6 +271,11 @@ export function cmdReport(flags, positionals, { json }) {
       ),
     );
     console.log(kv('covering', `${m.imported.days} ${plural(m.imported.days, 'day')}, ${m.imported.firstDay} to ${m.imported.lastDay}`));
+    if (m.imported.opening > 0) {
+      console.log(
+        kv('opening balance', `${fmtNum(m.imported.opening)} credits entered by hand, dated to the start of the cycle`),
+      );
+    }
     console.log(kv('source', `${m.imported.sources.join(', ') || 'unknown'}${m.imported.at ? c.dim(`  at ${fmtDate(m.imported.at, { withTime: true })}`) : ''}`));
     if (m.imported.unattributed > 0) {
       console.log(kv('unattributed', c.yellow(`${fmtNum(m.imported.unattributed)} credits with no model named in the SKU`)));

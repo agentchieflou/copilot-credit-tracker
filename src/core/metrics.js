@@ -1,5 +1,5 @@
 import { periodProgress, MS_PER_DAY } from './period.js';
-import { allPrompts, isImported, loggedSessions } from './ledger.js';
+import { allPrompts, isDerived, loggedSessions } from './ledger.js';
 import { round4 } from './models.js';
 
 export const LENGTH_BUCKETS = [
@@ -51,8 +51,8 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
   // the burn numbers, but it carries no session structure and no prompt text.
   // Everything about session shape or prompt length is therefore computed over
   // logged entries only, so a backfilled month cannot invent a habit.
-  const imported = prompts.filter(isImported);
-  const logged = prompts.filter((p) => !isImported(p));
+  const imported = prompts.filter(isDerived);
+  const logged = prompts.filter((p) => !isDerived(p));
   const loggedWithPrompts = loggedSessions(period).filter((s) => s.prompts.length > 0);
 
   const reqCredits = sum(prompts, (p) => p.credits);
@@ -60,6 +60,7 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
   const credits = round4(reqCredits + tokCredits);
   const importedCredits = sum(imported, promptCredits);
   const loggedCredits = round4(credits - importedCredits);
+  const aiu = sum(prompts, (p) => p.aiu);
   const remaining = allowance ? round4(Math.max(allowance - credits, 0)) : null;
   const over = allowance ? round4(Math.max(credits - allowance, 0)) : 0;
 
@@ -153,7 +154,8 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
         multiplier: mine[0]?.multiplier ?? meta?.multiplier ?? 0,
         prompts: mine.length,
         loggedPrompts: mineLogged.length,
-        importedCredits: sum(mine.filter(isImported), promptCredits),
+        importedCredits: sum(mine.filter(isDerived), promptCredits),
+        aiu: sum(mine, (p) => p.aiu),
         requests: sum(mine, (p) => p.count),
         credits: c,
         requestCredits: sum(mine, (p) => p.credits),
@@ -226,14 +228,21 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
   const dailyMap = new Map();
   for (const p of prompts) {
     const key = localDateKey(p.at);
-    const row = dailyMap.get(key) || { date: key, credits: 0, prompts: 0, requests: 0, imported: 0 };
+    const row = dailyMap.get(key) || { date: key, credits: 0, prompts: 0, requests: 0, imported: 0, opening: 0 };
     row.credits = round4(row.credits + promptCredits(p));
     row.requests = round4(row.requests + (p.count || 0));
-    if (isImported(p)) row.imported = round4(row.imported + promptCredits(p));
-    else row.prompts += 1;
+    if (isDerived(p)) {
+      row.imported = round4(row.imported + promptCredits(p));
+      if (p.source === 'manual') row.opening = round4(row.opening + promptCredits(p));
+    } else {
+      row.prompts += 1;
+    }
     dailyMap.set(key, row);
   }
   const daily = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+  // An opening balance sits on the first day of the cycle by construction, so
+  // it would win "busiest day" every time without meaning anything by it.
+  const workDays = daily.filter((d) => round4(d.credits - d.opening) > 0);
 
   // ---- backfill ------------------------------------------------------------
   const importedDays = [...new Set(imported.map((p) => localDateKey(p.at)))].sort();
@@ -250,7 +259,8 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
           imported.filter((p) => p.model === 'copilot-premium-request'),
           promptCredits,
         ),
-        sources: [...new Set(period.sessions.filter(isImported).map((s) => s.import?.source).filter(Boolean))],
+        sources: [...new Set(period.sessions.filter(isDerived).map((s) => s.import?.source).filter(Boolean))],
+        opening: sum(imported.filter((p) => p.source === 'manual'), promptCredits),
         at: period.lastImport?.at || null,
       }
     : null;
@@ -283,6 +293,14 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
       tokenCredits: tokCredits,
       loggedCredits,
       importedCredits,
+      /**
+       * AI credits, the unit the current Copilot billing platform charges in.
+       * Only entries that came from a source reporting it carry a value, so a
+       * ledger built purely from hand-logged premium requests reports 0 here
+       * rather than a number converted out of thin air.
+       */
+      aiu,
+      aiuPerDay: round4(aiu / Math.max(progress.daysElapsed, 1 / 24)),
       /** Prompts you logged. A backfilled day is spend, not a prompt. */
       prompts: logged.length,
       entries: prompts.length,
@@ -298,7 +316,7 @@ export function computeMetrics(period, cfg, { now = new Date(), table = null } =
       pace,
       safeDaily,
       exhaustion,
-      busiestDay: daily.length ? daily.reduce((a, b) => (b.credits > a.credits ? b : a)) : null,
+      busiestDay: workDays.length ? workDays.reduce((a, b) => (b.credits > a.credits ? b : a)) : null,
       activeDays: daily.length,
     },
     sessions: sessionStats,

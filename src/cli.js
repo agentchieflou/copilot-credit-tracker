@@ -12,6 +12,7 @@ import { cmdModels } from './commands/models.js';
 import { cmdConfig, cmdInit } from './commands/config.js';
 import { cmdSync } from './commands/sync.js';
 import { cmdImport } from './commands/import.js';
+import { cmdHarvest } from './commands/harvest.js';
 import { cmdExport } from './commands/export.js';
 
 const BOOLEAN_FLAGS = [
@@ -68,6 +69,7 @@ const COMMANDS = {
   sync: cmdSync,
   import: cmdImport,
   backfill: cmdImport,
+  harvest: cmdHarvest,
   pull: cmdImport,
   export: cmdExport,
 };
@@ -113,8 +115,11 @@ ${c.bold('SETUP')}
   ccred sync [--scope personal|organization|enterprise] [--dry-run]
 
 ${c.bold('STARTING MID-CYCLE')}
+  ccred harvest                   read the Copilot CLI's own session logs on this machine
+                                  ${c.dim('(no token, no network, no billing permission - try this first)')}
   ccred import                    pull this month's spend from GitHub into the ledger
   ccred import --file usage.csv   ...or from a usage report you exported instead
+  ccred import --credits 142      ...or from a number you can only read off a screen
   ccred import --dry-run          show what would be added, write nothing
   ccred import --replace          discard earlier backfills and re-pull
   ccred import --clear            remove backfilled entries, keep what you logged

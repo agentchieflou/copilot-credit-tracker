@@ -13,18 +13,33 @@ export function newId(prefix) {
  * session shape or prompt length, and the metrics engine keeps them apart.
  */
 export const ORIGIN_IMPORT = 'import';
+/** Read back from the Copilot CLI's own session logs on this machine. */
+export const ORIGIN_HARVEST = 'harvest';
 
 export function isImported(entry) {
   return entry?.origin === ORIGIN_IMPORT;
 }
 
-/** Sessions you actually logged, i.e. everything that is not a backfill. */
+export function isHarvested(entry) {
+  return entry?.origin === ORIGIN_HARVEST;
+}
+
+/**
+ * Anything the tool worked out rather than watched you do. Both backfills and
+ * harvested CLI sessions are real spend, but neither can say how many prompts
+ * it took, so both stay out of the session-shape statistics.
+ */
+export function isDerived(entry) {
+  return Boolean(entry?.origin) && entry.origin !== 'logged';
+}
+
+/** Sessions you actually logged, i.e. everything not derived from elsewhere. */
 export function loggedSessions(period) {
-  return period.sessions.filter((s) => !isImported(s));
+  return period.sessions.filter((s) => !isDerived(s));
 }
 
 export function importedSessions(period) {
-  return period.sessions.filter(isImported);
+  return period.sessions.filter(isDerived);
 }
 
 export function openSessions(period) {
